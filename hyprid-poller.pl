@@ -305,9 +305,6 @@ sub buildFieldsTable{
 sub printHelp{
     print <<EOF;
 metircbeat-redis-sql.pl HELP
-  --live  Run the inserts and redis cleanup. Without this what would have been done will be printed.
-           Without this option the script will not perform the Redis ltrim so the script will constantly
-           LRANGE all records. 
   --debug 1 = basic debug, insert and sleep >1 evertying in the script that shows a print command, so, everything
 	--dbname Name of the Postgresql database that will be used.
 	--dbhost Hostname or ip address of the Postgresql server.
