@@ -51,8 +51,8 @@ GetOptions(
 $dbport    = 5432         if !$dbport;
 $rediskey  = 'metricbeat' if !$rediskey;
 $debug = 0 if !$debug;
-
-if ( !$dbname || !$dbhost || !$dbuser || !$dbpass || $help ) {
+$dbhost = "localhost" if !$dbhost;
+if ( !$dbname || !$dbuser || !$dbpass || $help ) {
     print "Missing command line settings.\n";
     printHelp();
     exit;
