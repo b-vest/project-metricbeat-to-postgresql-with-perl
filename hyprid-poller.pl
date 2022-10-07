@@ -205,7 +205,7 @@ sub checkBatchSize{
 
 sub processInsertArray{
   my @thisArray = @_;
-      my $insertMetric = "INSERT INTO metric_values_hypertable (timestamp,field_id,hostname,device,value) VALUES(?,?,?,?,?)";
+      my $insertMetric = "INSERT INTO metric_values (timestamp,field_id,hostname,device,value) VALUES(?,?,?,?,?)";
     my $sth = $dbh->prepare($insertMetric);
   foreach my $metric(@thisArray){
     #In this version we are going to skip text and empty values. Maybe in the future log these and or add support
