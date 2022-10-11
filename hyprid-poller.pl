@@ -229,7 +229,7 @@ sub checkFieldNameExsts{
 	#Some field_names are wildcarded in the fields.asciidoc. We will of course have no match for these.
 	#Here we will verify that the field name exists, create it if it does not and return the created value
 	if(!$fieldNameRef->{$field_name}){
-		print "Field Name Does Not Exist. Creating: ".$field_name."\n";
+		#print "Field Name Does Not Exist. Creating: ".$field_name."\n";
     my $insertQuery = "INSERT INTO field_names (field_name) VALUES('" . $field_name . "')";
     my $newFieldReturn = $dbh->do($insertQuery);
 		my $fieldNamesSql = "SELECT * from field_names";
