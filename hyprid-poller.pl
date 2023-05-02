@@ -87,119 +87,62 @@ my $fieldNameRef = $dbh->selectall_hashref( $fieldNamesSql, "field_name" );
 my $insertCounter = 0;
 my @insertArray;
 
-do {
-START:
-    my $redisCounter = 0;
-    my $metric  = $redisClient->lpop( $rediskey);
 
-    if ( !$metric ) {
+while (1) {
+    my $metric = $redisClient->lpop($rediskey);
 
-        #if no metrics sleep for 2 seconds and try again.
+    unless ($metric) {
         print "No metrics. Sleeping\n" if $debug;
-        sleep(1);
-        goto START;
+        sleep(2);
+        next;
     }
 
-        #Loop through the metric array. This is an array of JSON text
-        #remove new line characters from end of string
-        chomp($metric);
+    chomp($metric);
+    my $metricHash = decode_json($metric);
+    my $timestamp = $metricHash->{'@timestamp'};
+    my $hostname = $metricHash->{host}->{name};
+    my $eventModule = $metricHash->{event}->{module};
+    my $metricSet = $metricHash->{metricset}->{name};
+    my $deviceName = $eventModule;
+    my $theseMetrics = $metricHash->{$eventModule}->{$metricSet};
 
-        #print $metric."\n";
-        #Convert JSON string into perl Hash object
-        my $metricHash = decode_json($metric);
+    print "$timestamp -> $hostname -> $eventModule -> $metricSet\n" if $debug >= 2;
+    print "$theseMetrics\n" if $debug >= 2;
 
-        #Assign a few variables for needed infomration at the root of the Hash
-        my $timestamp   = $metricHash->{'@timestamp'};
-        my $hostname    = $metricHash->{host}->{name};
-        my $eventModule = $metricHash->{event}->{module};
-        my $metricSet   = $metricHash->{metricset}->{name};
-        my $deviceName  = $eventModule;
+    if ($theseMetrics->{name}) {
+        print "This is a Device Name: $theseMetrics->{name}\n" if $debug >= 2;
+        $deviceName = $theseMetrics->{name};
+    }
 
-        #This creates the hash that contains the values that we want to ingest
-        #we create the $theseMetrics variable to hold the metrics hash so the
-        #hash keychains to not get long and confusing
-        my $theseMetrics = $metricHash->{$eventModule}->{$metricSet};
-        #If $theseMetrics is empty skip it. Maybe add logging in the future for things that are skipped
-        #for this project dropping it is fine.
-        print $timestamp. " ->" . $hostname . " -> " . $eventModule . " -> " . $metricSet . "\n" if $debug >= 2;
-        print $theseMetrics. "\n"                                                                if $debug >= 2;
+    process_metrics($theseMetrics, "", $eventModule, $metricSet, $timestamp, $hostname, $deviceName);
+}
 
-        #At this point we have to start looping through the metrics to get
-        #the names and values of the metrics.
-        #These can be up to four layers deep depending on the type of
-        #metric
-        #first level loop
-        if ( $theseMetrics->{name} ) {
-            print "This is a Device Name: " . $theseMetrics->{name} . "\n" if $debug >= 2;
-            $deviceName = $theseMetrics->{name};
+
+sub process_metrics {
+    my ($hash_ref, $field_prefix, $eventModule, $metricSet, $timestamp, $hostname, $deviceName) = @_;
+    my $field_name;
+
+    foreach my $key (keys %{$hash_ref}) {
+        my $value = $hash_ref->{$key};
+        if (ref($value) eq "HASH") {
+            process_metrics($value, $field_prefix . ".$key", $eventModule, $metricSet, $timestamp, $hostname, $deviceName);
+        } else {
+            $field_name = $eventModule . "." . $metricSet . $field_prefix . ".$key";
+            my $fieldCheckReturn = checkFieldNameExsts($field_name);
+            my $field_id   = $fieldNameRef->{$field_name}->{field_id};
+            push(@insertArray,[$timestamp, $field_id, $hostname, $deviceName, $value, $field_name]);
+            ++$insertCounter;
+            checkBatchSize(@insertArray);
         }
-        foreach my $level_1 ( keys %{$theseMetrics} ) {
-            #Create New Variable for this level
-            my $level_1Hash = $theseMetrics->{$level_1};
-            #Check to see if this is a key with a value or another hash to loop
-            if ( ref($level_1Hash) eq "HASH" ) {
-                #Here we will loop the variable that we created above which is actually $theseMetrics->{$level_1}
-                foreach my $level_2 ( keys %{$level_1Hash} ) {
-                    #second Level Loop
-                    my $level_2Hash = $level_1Hash->{$level_2};
-                    if ( ref($level_2Hash) eq "HASH" ) {
-                        #third level loop
-                        foreach my $level_3 ( keys %{$level_2Hash} ) {
-                            my $level_3Hash = $level_2Hash->{$level_3};
-                            if ( ref($level_3Hash) eq "HASH" ) {
-                                #fourth level loop
-                                foreach my $level_4 ( keys %{$level_3Hash} ) {
-                                    my $level_4Hash = $level_3Hash->{$level_4};
-                                    if ( ref($level_4Hash) eq "HASH" ) {
-                                        #No hashes are above 4 deep in this data set
-                                        #This is a place holder for logic flow
-                                    }
-                                    else {
-                                        my $field_name = $eventModule . "." . $metricSet . "." . $level_1 . "." . $level_2 . "." . $level_3 . "." . $level_4;
-                                        my $fieldCheckReturn = checkFieldNameExsts($field_name);
-                                        my $field_id   = $fieldNameRef->{$field_name}->{field_id};
-                                        push(@insertArray,[$timestamp, $field_id, $hostname, $deviceName, $level_4Hash, $field_name]);
-                                        ++$insertCounter;
-                                        checkBatchSize(@insertArray);
-                                    }
-                                }
-                            }
-                            else {
-                                my $field_name = $eventModule . "." . $metricSet . "." . $level_1 . "." . $level_2 . "." . $level_3;
-                                my $fieldCheckReturn = checkFieldNameExsts($field_name);
-                                my $field_id   = $fieldNameRef->{$field_name}->{field_id};
-                                push(@insertArray, [$timestamp, $field_id, $hostname, $deviceName, $level_3Hash, $field_name]);
-                                ++$insertCounter;
-                                checkBatchSize(@insertArray);
-                            }
-                        }
-                    }
-                    else {
-                        my $field_name = $eventModule . "." . $metricSet . "." . $level_1 . "." . $level_2;
-                        my $fieldCheckReturn = checkFieldNameExsts($field_name);
-                        my $field_id   = $fieldNameRef->{$field_name}->{field_id};
-                        push(@insertArray,[$timestamp, $field_id, $hostname, $deviceName, $level_2Hash, $field_name]);
-                        ++$insertCounter;
-                        checkBatchSize(@insertArray);
-                    }
-                }    #end $level_1Hash Loop
-            }
-            else {
-                #This is jsut a place holder for logic flow
-                #We do no inserts here because this can only contain the
-                #name string which we assigned at the top of
-                #this loop
-            }
-        }# end $theseMetricsHash Loop
-
-} while 1;
+    }
+}
 
 
 sub checkBatchSize{
   my @thisArray = @_;
   if(scalar(@thisArray >= $batchsize)){
       #print scalar(@thisArray)."\n";
-    my $insertReturn = processInsertArray(@thisArray);
+        my $insertReturn = processInsertArray(@thisArray);
   }
 }
 
@@ -241,62 +184,47 @@ $dbh->commit();
 	}
 }
 
-sub buildFieldsTable{
-	    print "build_fields_table\n";
-    if ( !$fields_file ) {
+sub buildFieldsTable {
+    print "build_fields_table\n";
+
+    if (!$fields_file) {
         print "Missing --fields_file\n";
         printHelp();
         exit;
     }
-    my @fieldsLines = qx(cat $fields_file);
-    my $fieldsLines;
-    my $field_name;
-    my $insertQuery;
-    my $lineCounter   = 0;
+
+    open(my $fh, '<', $fields_file) or die "Failed to open file: $!";
+
     my $insertedCount = 0;
     my $updatedCount  = 0;
-    my @insertArray;
 
-    foreach my $line (@fieldsLines) {
+    while (my $line = <$fh>) {
         chomp($line);
-        if ( $line =~ /::/ ) {
-            chomp( $fieldsLines[ $lineCounter + 3 ] );
-            $fieldsLines[ $lineCounter + 3 ] =~ s/'//g;
 
-            #Check and ingest field_name if it does not exist
-            if ( $insertQuery =~ "INSERT" ) {
-                print "Do The insert\n";
-                $insertQuery = "";
-            }
+        if ($line =~ /::/) {
+            my ($field_name) = $line =~ /`\K[^`]+/;
+            chomp(my $description = <$fh>);
+            $description =~ s/'//g;
 
-            #print "Split Field Name\n";
-            ( undef, $field_name, undef ) = split( /\`/, $line );
+            my $insertQuery = "
+                INSERT INTO field_names (field_name, description)
+                VALUES ('$field_name', '$description')
+                ON DUPLICATE KEY UPDATE description = '$description'
+            ";
 
-            #print $field_name."\n";
-            #check if this row already exists in the database
-            my $checkSql       = "SELECT * from field_names where field_name = '" . $field_name . "'";
-            my $fieldNameCheck = $dbh->selectall_hashref( $checkSql, "field_name" );
-            $dbh->commit();
+            my $sth = $dbh->prepare($insertQuery);
+            $sth->execute();
 
-            if ( $fieldNameCheck->{$field_name}->{field_id} ) {
-                my $updateSql = "UPDATE field_names SET description = '" . $fieldsLines[ $lineCounter + 3 ] . "' WHERE field_name = '" . $field_name . "'";
-                $dbh->do($updateSql);
+            if ($sth->rows == 1) {
+                ++$insertedCount;
+            } elsif ($sth->rows == 2) {
                 ++$updatedCount;
             }
-            else {
-                my $insertQuery = "INSERT INTO field_names (field_name, description) VALUES('" . $field_name . "','" . $fieldsLines[ $lineCounter + 3 ] . "')";
-                $dbh->do($insertQuery);
-
-                ++$insertedCount;
-            }
         }
-
-        #print "Field Name: ".$field_name." ".$line ."\n";
-        ++$lineCounter;
     }
 
     $dbh->commit();
-    print "Finished processing fields_talbe. Inserted: " . $insertedCount . " Updated: " . $updatedCount . " \n";
+    print "Finished processing fields_talbe. Inserted: $insertedCount Updated: $updatedCount\n";
 
     exit;
 }
