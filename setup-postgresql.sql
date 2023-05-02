@@ -1,4 +1,4 @@
-CREATE DATABASE IF NOT EXISTS metrics_ht;
+CREATE DATABASE metrics_ht;
 \c metrics_ht;
 
 CREATE  TABLE "public".field_names (
